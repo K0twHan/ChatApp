@@ -12,12 +12,12 @@ export class UserService {
     }
 
     async UserRegister (data : any) {
-        var passw = this.HashPassword(data.password);
+        var passw = await this.HashPassword(data.password);
         if(data.bio == null) {
         return await this.DbService.user.create({
             data : {
                 email : data.email,
-                password : String(passw),
+                password : passw,
                 name : data.name,
                 lastName : data.lastName,
             }
@@ -64,4 +64,7 @@ export class UserService {
         return hash;
       }
 
+      async ComparePassword(password: string, hash: string) : Promise<boolean> {
+        return await bcrypt.compare(password, hash);
+      }
     }
