@@ -1,9 +1,9 @@
 "use client";
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "next/navigation"; // Updated import
 import Image from "next/image";
 
-export default function Home() {
+export default function Index() {
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -15,7 +15,7 @@ export default function Home() {
     setError("");
 
     try {
-      const response = await fetch("https://api.batuhantekin.info/auth/LogIn", {
+      const response = await fetch("http://localhost:9900/auth/LogIn", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -30,9 +30,8 @@ export default function Home() {
       const data = await response.json();
       localStorage.setItem("token", data.access_token);
       setShowLoginModal(false);
-      router.push("/chat");
+      router.push("/chatPage"); // Ensure this path is correct
     } catch {
-      // Removed the error parameter completely since we don't use it
       setError("Giriş başarısız. Lütfen bilgilerinizi kontrol edin.");
     }
   };
@@ -43,12 +42,10 @@ export default function Home() {
         <h1 className="text-2xl font-bold">Projemize Hoş Geldiniz</h1>
         <Image
           className="rounded-full"
-          src="/logo.webp"
+          src="/logo.png"
           alt="Proje Logosu"
           width={40}
           height={40}
-          unoptimized
-          priority
         />
       </header>
       <main className="flex flex-col items-center w-full max-w-2xl bg-white shadow-lg rounded-lg p-8 mt-8">
@@ -86,7 +83,7 @@ export default function Home() {
                   id="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="mt-1 block w-full p-2 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-800 placeholder-gray-400"
+                  className="mt-1 block w-full p-2 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500"
                   required
                 />
               </div>
@@ -99,7 +96,7 @@ export default function Home() {
                   id="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="mt-1 block w-full p-2 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-800 placeholder-gray-400"
+                  className="mt-1 block w-full p-2 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500"
                   required
                 />
               </div>
