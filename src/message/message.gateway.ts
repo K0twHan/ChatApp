@@ -67,16 +67,26 @@ export class ChatGateway
       where: {
         receiver_id: userId,
         is_read: false,
-        is_delivered : false,
+        is_delivered: false,
       },
     });
   
     // Bekleyen mesajları kullanıcıya gönder
     pendingMessages.forEach(async (msg) => {
-      client.emit('receive_message', {
-        senderId: msg.sender_id,
-        message: msg.content,
-      });
+      // Mesaj tipine göre farklı veri gönder
+      if (msg.message_type === 'photo' && msg.photo_data) {
+        client.emit('receive_photo', {
+          senderId: msg.sender_id,
+          photo: msg.photo_data,
+          messageType: 'photo'
+        });
+      } else {
+        client.emit('receive_message', {
+          senderId: msg.sender_id,
+          message: msg.content,
+          messageType: msg.message_type
+        });
+      }
   
       // Mesajın teslim edildiğini işaretle
       await this.DbService.message.update({
@@ -190,24 +200,32 @@ async handleUserList() {
 
 @SubscribeMessage('send_message')
 async handleMessage(
-  @MessageBody() data: { receiver_id: string; message: string }, @ConnectedSocket() client: Socket
+  @MessageBody() data: { receiver_id: string; message: string; messageType?: string }, 
+  @ConnectedSocket() client: Socket
 ) {
   const { receiver_id, message } = data;
-  var senderId = client.data.userId;
+  const messageType = data.messageType || 'text';
+  const senderId = client.data.userId;
+  
   // Alıcı online mı kontrol et
   const receiverSocket = this.userSockets.get(receiver_id);
   if (receiverSocket) {
     // Alıcı online ise mesajı anında gönder
-    receiverSocket.emit('receive_message', { senderId, message });
-    this.logger.warn(`Message sent to user ${receiver_id}`);
+    receiverSocket.emit('receive_message', { 
+      senderId, 
+      message, 
+      messageType 
+    });
+    
     // Mesajın teslim edildiğini veritabanında güncelle
     await this.DbService.message.create({
       data: {
-        sender_id : senderId,
+        sender_id: senderId,
         receiver_id,
         content: message,
+        message_type: messageType,
         is_delivered: true,
-        is_read : false  // Mesajın teslim edildiğini belirtiyoruz
+        is_read: false
       },
     });
 
@@ -216,11 +234,12 @@ async handleMessage(
     // Alıcı offline ise mesajı veritabanına kaydet
     await this.DbService.message.create({
       data: {
-        sender_id : senderId,
+        sender_id: senderId,
         receiver_id,
         content: message,
+        message_type: messageType,
         is_read: false,
-        is_delivered: false, // Henüz teslim edilmedi
+        is_delivered: false,
       },
     });
 
@@ -285,21 +304,56 @@ async handleGetChatHistory(
 
 @SubscribeMessage('send_photo')
 async handlePhoto(
-  @MessageBody() data: { receiver_id: string; photo: ArrayBuffer }, @ConnectedSocket() client: Socket
+  @MessageBody() data: { receiver_id: string; photo: ArrayBuffer }, 
+  @ConnectedSocket() client: Socket
 ) {
   const { receiver_id, photo } = data;
-  var senderId = client.data.userId;
+  const senderId = client.data.userId;
+  
+  // Photo data'yı Uint8Array'e çevir (ArrayBuffer'dan)
+  const photoBytes = new Uint8Array(photo);
+  
   // Alıcı online mı kontrol et
   const receiverSocket = this.userSockets.get(receiver_id);
+  
   if (receiverSocket) {
-    // Alıcı online ise mesajı anında gönder
-    receiverSocket.emit('receive_photo', { senderId, photo });
-    this.logger.warn(`Photo sent to user ${receiver_id}`);
+    // Alıcı online ise fotoğrafı anında gönder
+    receiverSocket.emit('receive_photo', { 
+      senderId, 
+      photo,
+      messageType: 'photo'
+    });
     
-   
-
-    this.logger.log(`Photo sent to user ${receiver_id}`);
-  }
-
+    // Veritabanına kaydet (iletildi olarak)
+    await this.DbService.message.create({
+      data: {
+        sender_id: senderId,
+        receiver_id,
+        content: null,
+        photo_data: Buffer.from(photoBytes),
+        message_type: 'photo',
+        is_delivered: true,
+        is_read: false
+      },
+    });
+    
+    this.logger.log(`Photo delivered to user ${receiver_id}`);
+  } else {
+    // Alıcı offline ise fotoğrafı veritabanına kaydet
+    await this.DbService.message.create({
+      data: {
+        sender_id: senderId,
+        receiver_id,
+        content: null,
+        photo_data: Buffer.from(photoBytes),
+        message_type: 'photo',
+        is_delivered: false,
+        is_read: false
+      },
+    });
+    
+    this.logger.warn(`User ${receiver_id} is offline. Photo saved to database.`);
   }
 }
+
+  }
