@@ -34,6 +34,7 @@ model Message {
   file_url String?
   sender_id String
   receiver_id String
+  is_delivered Boolean @default(false)
   is_read Boolean @default(false)
   createdAt DateTime @default(now())
 

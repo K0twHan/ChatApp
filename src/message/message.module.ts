@@ -7,6 +7,7 @@ import { JwtModule } from '@nestjs/jwt';
 @Module({
   imports: [DbModule,JwtModule],
   controllers: [],
-  providers: [ChatGateway]
+  providers: [ChatGateway],
+  exports: [ChatGateway]
 })
 export class MessageModule {}
