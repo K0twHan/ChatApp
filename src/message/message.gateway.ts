@@ -78,6 +78,7 @@ export class ChatGateway
         client.emit('receive_photo', {
           senderId: msg.sender_id,
           photo: msg.photo_data,
+          message: msg.content, // Fotoğraf ile birlikte gönderilen mesajı da ekleyelim
           messageType: 'photo'
         });
       } else {
@@ -304,10 +305,10 @@ async handleGetChatHistory(
 
 @SubscribeMessage('send_photo')
 async handlePhoto(
-  @MessageBody() data: { receiver_id: string; photo: ArrayBuffer }, 
+  @MessageBody() data: { receiver_id: string; photo: ArrayBuffer; message?: string }, 
   @ConnectedSocket() client: Socket
 ) {
-  const { receiver_id, photo } = data;
+  const { receiver_id, photo, message } = data;
   const senderId = client.data.userId;
   
   // Photo data'yı Uint8Array'e çevir (ArrayBuffer'dan)
@@ -317,10 +318,11 @@ async handlePhoto(
   const receiverSocket = this.userSockets.get(receiver_id);
   
   if (receiverSocket) {
-    // Alıcı online ise fotoğrafı anında gönder
+    // Alıcı online ise fotoğrafı ve varsa mesajı anında gönder
     receiverSocket.emit('receive_photo', { 
       senderId, 
       photo,
+      message,
       messageType: 'photo'
     });
     
@@ -329,7 +331,7 @@ async handlePhoto(
       data: {
         sender_id: senderId,
         receiver_id,
-        content: null,
+        content: message, // Eğer mesaj varsa kaydedilecek
         photo_data: Buffer.from(photoBytes),
         message_type: 'photo',
         is_delivered: true,
@@ -337,14 +339,14 @@ async handlePhoto(
       },
     });
     
-    this.logger.log(`Photo delivered to user ${receiver_id}`);
+    this.logger.log(`Photo delivered to user ${receiver_id}${message ? ' with message' : ''}`);
   } else {
-    // Alıcı offline ise fotoğrafı veritabanına kaydet
+    // Alıcı offline ise fotoğrafı ve varsa mesajı veritabanına kaydet
     await this.DbService.message.create({
       data: {
         sender_id: senderId,
         receiver_id,
-        content: null,
+        content: message,
         photo_data: Buffer.from(photoBytes),
         message_type: 'photo',
         is_delivered: false,
@@ -352,8 +354,119 @@ async handlePhoto(
       },
     });
     
-    this.logger.warn(`User ${receiver_id} is offline. Photo saved to database.`);
+    this.logger.warn(`User ${receiver_id} is offline. Photo${message ? ' and message' : ''} saved to database.`);
   }
 }
 
+@SubscribeMessage('offer')
+handleOffer(@MessageBody() data: { senderId: string, receiverId: string, offer: any }, @ConnectedSocket() client: Socket) {
+  this.logger.log(`Offer from ${data.senderId} to ${data.receiverId}`);
+  // Kullanıcı ID'sine göre alıcının socket'ini bul
+  const receiverSocket = this.userSockets.get(data.receiverId);
+  if (receiverSocket) {
+    receiverSocket.emit('offer', {
+      senderId: data.senderId,
+      receiverId: data.receiverId,
+      offer: data.offer
+    });
+    this.logger.log(`Offer sent to ${data.receiverId}`);
+  } else {
+    client.emit('call_error', { message: `Kullanıcı ${data.receiverId} çevrimiçi değil.` });
+    this.logger.warn(`Receiver ${data.receiverId} not online to receive offer`);
   }
+}
+
+@SubscribeMessage('answer')
+handleAnswer(@MessageBody() data: { senderId: string, receiverId: string, answer: any }, @ConnectedSocket() client: Socket) {
+  this.logger.log(`Answer from ${data.senderId} to ${data.receiverId}`);
+  // Kullanıcı ID'sine göre alıcının socket'ini bul
+  const receiverSocket = this.userSockets.get(data.receiverId);
+  if (receiverSocket) {
+    receiverSocket.emit('answer', {
+      senderId: data.senderId,
+      receiverId: data.receiverId,
+      answer: data.answer
+    });
+    this.logger.log(`Answer sent to ${data.receiverId}`);
+  } else {
+    this.logger.warn(`Receiver ${data.receiverId} not online to receive answer`);
+  }
+}
+
+@SubscribeMessage('candidate')
+handleCandidate(@MessageBody() data: { senderId: string, receiverId: string, candidate: any }, @ConnectedSocket() client: Socket) {
+  this.logger.log(`ICE Candidate from ${data.senderId} to ${data.receiverId}`);
+  // Kullanıcı ID'sine göre alıcının socket'ini bul
+  const receiverSocket = this.userSockets.get(data.receiverId);
+  if (receiverSocket) {
+    receiverSocket.emit('candidate', {
+      senderId: data.senderId,
+      receiverId: data.receiverId,
+      candidate: data.candidate
+    });
+    this.logger.log(`ICE candidate sent to ${data.receiverId}`);
+  } else {
+    this.logger.warn(`Receiver ${data.receiverId} not online to receive ICE candidate`);
+  }
+}
+
+@SubscribeMessage('call_request')
+handleCallRequest(@MessageBody() data: { receiverId: string }, @ConnectedSocket() client: Socket) {
+  const senderId = client.data.userId;
+  if (!senderId) return;
+  
+  const receiverSocket = this.userSockets.get(data.receiverId);
+  if (receiverSocket) {
+    // Karşı tarafa arama isteği gönder
+    receiverSocket.emit('call_request', {
+      senderId: senderId,
+      senderName: client.data.userName || "Bilinmeyen Kullanıcı"
+    });
+    this.logger.log(`Call request sent from ${senderId} to ${data.receiverId}`);
+  } else {
+    client.emit('call_error', { message: `Kullanıcı çevrimiçi değil.` });
+    this.logger.warn(`User ${data.receiverId} is not online for call request`);
+  }
+}
+
+@SubscribeMessage('call_response')
+handleCallResponse(@MessageBody() data: { senderId: string, accepted: boolean }, @ConnectedSocket() client: Socket) {
+  const receiverId = client.data.userId;
+  if (!receiverId) return;
+  
+  const senderSocket = this.userSockets.get(data.senderId);
+  if (senderSocket) {
+    senderSocket.emit('call_response', {
+      receiverId: receiverId,
+      accepted: data.accepted
+    });
+    this.logger.log(`Call ${data.accepted ? 'accepted' : 'rejected'} by ${receiverId}`);
+  } else {
+    this.logger.warn(`User ${data.senderId} is no longer online`);
+  }
+}
+
+@SubscribeMessage('end_call')
+handleEndCall(@MessageBody() data: { peerId: string }, @ConnectedSocket() client: Socket) {
+  const userId = client.data.userId;
+  if (!userId) return;
+  
+  const peerSocket = this.userSockets.get(data.peerId);
+  if (peerSocket) {
+    peerSocket.emit('call_ended', { by: userId });
+    this.logger.log(`Call ended by ${userId}`);
+  }
+}
+
+@SubscribeMessage('join_call')
+handleJoinCall(@MessageBody() data: { senderId: string; receiverId: string }, @ConnectedSocket() client: Socket) {
+  const receiverSocket = this.userSockets.get(data.receiverId);
+  if (receiverSocket) {
+    receiverSocket.emit('join_call', { senderId: data.senderId, receiverId: data.receiverId });
+    this.logger.log(`User ${data.senderId} joined the call with ${data.receiverId}`);
+  } else {
+    this.logger.warn(`User ${data.receiverId} is not online to join the call`);
+  }
+}
+
+}
